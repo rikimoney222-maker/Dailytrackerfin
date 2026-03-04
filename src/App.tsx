@@ -287,7 +287,7 @@ export default function App() {
 
   const fired = useRef({});
   const toastTimer = useRef(null);
-  const chatEndRef = useRef(null);
+  const chatEndRef = useRef<any>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
