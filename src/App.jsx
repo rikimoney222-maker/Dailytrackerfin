@@ -14,9 +14,11 @@ import {
   Snowflake,
   Brain,
   Send,
-  X,
   AlertCircle,
-  ChevronRight,
+  BookOpen,
+  Search,
+  BookMarked,
+  Camera,
 } from "lucide-react";
 
 /* ─── CONSTANTS ─────────────────────────────────────────── */
@@ -249,6 +251,7 @@ const s = {
 
 /* ─── MAIN APP ──────────────────────────────────────────── */
 export default function App() {
+  // Core
   const [tasks, setTasks] = useState([]);
   const [input, setInput] = useState("");
   const [tab, setTab] = useState("tasks");
@@ -270,7 +273,7 @@ export default function App() {
   const [foodTag, setFoodTag] = useState("green");
   const [toast, setToast] = useState(null);
 
-  // Mentor state
+  // Mentor
   const DEFAULT_KEY = "Твій_ключ";
   const [groqKey, setGroqKey] = useState(DEFAULT_KEY);
   const [showKey, setShowKey] = useState(false);
@@ -285,9 +288,19 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
 
+  // Reading
+  const [readPages, setReadPages] = useState(0);
+  const [readGoal, setReadGoal] = useState(20);
+  const [books, setBooks] = useState([]);
+  const [bookInput, setBookInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isScanningBook, setIsScanningBook] = useState(false);
+  const [scanPreview, setScanPreview] = useState(null); // base64 preview
+
   const fired = useRef({});
   const toastTimer = useRef(null);
   const chatEndRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -299,7 +312,7 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
-  /* notifications */
+  // Notifications
   useEffect(() => {
     if (!notifEnabled) return;
     const tick = () => {
@@ -318,7 +331,7 @@ export default function App() {
     return () => clearInterval(iv);
   }, [notifEnabled, notifTime]);
 
-  /* ── TASKS ── */
+  // Tasks
   const addTask = () => {
     if (!input.trim()) return;
     setTasks((p) => [
@@ -378,7 +391,7 @@ export default function App() {
   const total = tasks.length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-  /* ── FOOD ── */
+  // Food
   const foodStats = FOOD_TAGS.map((ft) => ({
     ...ft,
     count: foodLogs.filter((l) => l.tag === ft.val).length,
@@ -392,7 +405,7 @@ export default function App() {
     setFoodInput("");
   };
 
-  /* ── MENTOR / AI ── */
+  // Mentor / Groq chat
   const sendMessage = async () => {
     const text = chatInput.trim();
     if (!text || isTyping) return;
@@ -446,16 +459,133 @@ export default function App() {
     showToast("💬 Історію чату очищено");
   };
 
+  // Books / Library
+  const addBook = () => {
+    if (!bookInput.trim()) return;
+    setBooks((p) => [
+      ...p,
+      { id: Date.now(), title: bookInput.trim(), completed: false },
+    ]);
+    setBookInput("");
+    setScanPreview(null);
+  };
+
+  const toggleBook = (id) =>
+    setBooks((p) =>
+      p.map((b) => (b.id === id ? { ...b, completed: !b.completed } : b))
+    );
+  const deleteBook = (id) => setBooks((p) => p.filter((b) => b.id !== id));
+  const filteredBooks = books
+    .filter((b) => b.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => Number(a.completed) - Number(b.completed));
+
+  // ── AI Book Cover Scanner ──
+  const fileToBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]); // strip data:...;base64,
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const scanBookCover = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // reset input so same file can be re-selected
+    e.target.value = "";
+
+    if (!groqKey || groqKey === "Твій_ключ") {
+      showToast("⚠️ Спочатку введи Groq API ключ у Налаштуваннях");
+      return;
+    }
+
+    setIsScanningBook(true);
+    setScanPreview(null);
+
+    try {
+      const base64 = await fileToBase64(file);
+      // Show small preview while waiting
+      setScanPreview(`data:${file.type};base64,${base64}`);
+
+      const res = await fetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${groqKey}`,
+          },
+          body: JSON.stringify({
+            model: "meta-llama/llama-4-scout-17b-16e-instruct",
+            max_tokens: 100,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "image_url",
+                    image_url: { url: `data:${file.type};base64,${base64}` },
+                  },
+                  {
+                    type: "text",
+                    text: `Look at this book cover image. Extract and return ONLY the book title and author in this exact format: "Title by Author". If you cannot determine the title, return only the title without author. Do not add any explanation, quotes, or extra text.`,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data?.error?.message || `Помилка API ${res.status}`);
+
+      const raw = data.choices?.[0]?.message?.content?.trim() || "";
+      if (!raw) throw new Error("AI не зміг розпізнати обкладинку");
+
+      setBookInput(raw);
+      showToast(`📚 Розпізнано: ${raw}`);
+    } catch (err) {
+      showToast(`❌ Помилка сканування: ${err.message}`);
+      setScanPreview(null);
+    } finally {
+      setIsScanningBook(false);
+    }
+  };
+
+  // Reading helpers
+  const readPct =
+    readGoal > 0 ? Math.min(100, Math.round((readPages / readGoal) * 100)) : 0;
+
   const TABS = [
     { id: "tasks", label: "Завдання", Icon: ListTodo },
     { id: "stats", label: "Статистика", Icon: BarChart2 },
     { id: "food", label: "Їжа", Icon: UtensilsCrossed },
+    { id: "reading", label: "Читання", Icon: BookOpen },
     { id: "mentor", label: "Ментор", Icon: Brain },
     { id: "settings", label: "Налашт.", Icon: Settings },
   ];
 
+  /* ══════════════════════════════════════════════════════ RENDER */
   return (
     <div style={s.wrap}>
+      {/* Hidden camera/file input */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={scanBookCover}
+      />
+
+      {/* Spinning keyframe + pulse animation */}
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1.1)} }
+      `}</style>
+
       {/* Toast */}
       {toast && (
         <div
@@ -564,7 +694,7 @@ export default function App() {
         {/* ══ TASKS ══ */}
         {tab === "tasks" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ ...s.card }}>
+            <div style={s.card}>
               <p
                 style={{
                   margin: "0 0 10px",
@@ -602,7 +732,6 @@ export default function App() {
                 ))}
               </div>
             </div>
-
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 value={input}
@@ -636,7 +765,6 @@ export default function App() {
                 <Plus size={22} />
               </button>
             </div>
-
             {tasks.length === 0 ? (
               <div
                 style={{
@@ -1243,6 +1371,525 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ READING ══ */}
+        {tab === "reading" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <h2 style={s.h2}>📖 Читання</h2>
+
+            {/* Page tracker */}
+            <div style={s.card}>
+              <p
+                style={{
+                  margin: "0 0 12px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#94a3b8",
+                }}
+              >
+                📄 Трекер сторінок сьогодні
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 12,
+                }}
+              >
+                <button
+                  onClick={() => setReadPages((p) => Math.max(0, p - 1))}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid #334155",
+                    backgroundColor: "#1e293b",
+                    color: "#fff",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  −
+                </button>
+                <div style={{ flex: 1, textAlign: "center" }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 36,
+                      fontWeight: 800,
+                      color: "#a78bfa",
+                    }}
+                  >
+                    {readPages}
+                  </p>
+                  <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>
+                    з {readGoal} сторінок
+                  </p>
+                </div>
+                <button
+                  onClick={() => setReadPages((p) => p + 1)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid #7c3aed",
+                    backgroundColor: "#7c3aed",
+                    color: "#fff",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  +
+                </button>
+              </div>
+              <div
+                style={{
+                  backgroundColor: "#1e293b",
+                  borderRadius: 99,
+                  height: 8,
+                  overflow: "hidden",
+                  marginBottom: 8,
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${readPct}%`,
+                    background: "linear-gradient(90deg,#7c3aed,#a78bfa)",
+                    borderRadius: 99,
+                    transition: "width .4s",
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <span style={{ fontSize: 12, color: "#64748b" }}>
+                  {readPct}% виконано
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: "#64748b" }}>Мета:</span>
+                  <input
+                    type="number"
+                    value={readGoal}
+                    min={1}
+                    onChange={(e) =>
+                      setReadGoal(Math.max(1, Number(e.target.value)))
+                    }
+                    style={{
+                      width: 54,
+                      backgroundColor: "#1e293b",
+                      border: "1px solid #334155",
+                      borderRadius: 8,
+                      padding: "4px 8px",
+                      color: "#fff",
+                      fontSize: 13,
+                      outline: "none",
+                      textAlign: "center",
+                    }}
+                  />
+                  <span style={{ fontSize: 12, color: "#64748b" }}>стор.</span>
+                </div>
+              </div>
+              {readPages >= readGoal && readGoal > 0 && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    backgroundColor: "#052e16",
+                    border: "1px solid #16a34a",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    fontSize: 13,
+                    color: "#86efac",
+                    textAlign: "center",
+                  }}
+                >
+                  🎉 Ціль на сьогодні виконана! Чудова робота!
+                </div>
+              )}
+            </div>
+
+            {/* Library card */}
+            <div style={s.card}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 14,
+                }}
+              >
+                <BookMarked size={18} color="#a78bfa" />
+                <span style={{ fontWeight: 700, fontSize: 15, color: "#fff" }}>
+                  📚 Моя бібліотека
+                </span>
+                {books.length > 0 && (
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: 12,
+                      backgroundColor: "#1e293b",
+                      padding: "2px 10px",
+                      borderRadius: 99,
+                      color: "#94a3b8",
+                    }}
+                  >
+                    {books.filter((b) => b.completed).length}/{books.length}{" "}
+                    прочитано
+                  </span>
+                )}
+              </div>
+
+              {/* Add book row: text input + camera + add button */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <input
+                  value={bookInput}
+                  onChange={(e) => setBookInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addBook()}
+                  placeholder="Назва книги..."
+                  style={{ ...s.input }}
+                />
+
+                {/* Camera scan button */}
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={isScanningBook}
+                  title="Сфотографувати обкладинку"
+                  style={{
+                    backgroundColor: isScanningBook ? "#1e293b" : "#0f172a",
+                    border: `1px solid ${
+                      isScanningBook ? "#7c3aed" : "#334155"
+                    }`,
+                    borderRadius: 10,
+                    padding: "0 13px",
+                    cursor: isScanningBook ? "not-allowed" : "pointer",
+                    color: isScanningBook ? "#a78bfa" : "#64748b",
+                    display: "flex",
+                    alignItems: "center",
+                    flexShrink: 0,
+                    transition: "all .2s",
+                  }}
+                >
+                  {isScanningBook ? (
+                    <RefreshCw
+                      size={18}
+                      style={{ animation: "spin 1s linear infinite" }}
+                    />
+                  ) : (
+                    <Camera size={18} />
+                  )}
+                </button>
+
+                {/* Add book button */}
+                <button
+                  onClick={addBook}
+                  disabled={!bookInput.trim()}
+                  style={{
+                    backgroundColor: bookInput.trim() ? "#7c3aed" : "#1e293b",
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "0 14px",
+                    cursor: bookInput.trim() ? "pointer" : "not-allowed",
+                    color: bookInput.trim() ? "#fff" : "#475569",
+                    display: "flex",
+                    alignItems: "center",
+                    flexShrink: 0,
+                    transition: "all .2s",
+                  }}
+                >
+                  <Plus size={20} />
+                </button>
+              </div>
+
+              {/* Scan preview + status banner */}
+              {isScanningBook && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    backgroundColor: "#0d0a1a",
+                    border: "1px solid #7c3aed44",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    marginBottom: 12,
+                  }}
+                >
+                  {scanPreview && (
+                    <img
+                      src={scanPreview}
+                      alt="preview"
+                      style={{
+                        width: 48,
+                        height: 64,
+                        objectFit: "cover",
+                        borderRadius: 6,
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
+                  <div>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 13,
+                        color: "#a78bfa",
+                        fontWeight: 600,
+                      }}
+                    >
+                      🔍 AI читає обкладинку...
+                    </p>
+                    <p
+                      style={{
+                        margin: "2px 0 0",
+                        fontSize: 11,
+                        color: "#64748b",
+                      }}
+                    >
+                      Використовується Llama 4 Scout Vision
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Scan result preview (after scan, before adding) */}
+              {!isScanningBook && scanPreview && bookInput && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    backgroundColor: "#052e16",
+                    border: "1px solid #16a34a44",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    marginBottom: 12,
+                  }}
+                >
+                  <img
+                    src={scanPreview}
+                    alt="preview"
+                    style={{
+                      width: 40,
+                      height: 54,
+                      objectFit: "cover",
+                      borderRadius: 6,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>
+                      Розпізнано:
+                    </p>
+                    <p
+                      style={{
+                        margin: "2px 0 0",
+                        fontSize: 13,
+                        color: "#86efac",
+                        fontWeight: 600,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {bookInput}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setScanPreview(null);
+                      setBookInput("");
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#475569",
+                      padding: 4,
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Search */}
+              {books.length > 0 && (
+                <div style={{ position: "relative", marginBottom: 14 }}>
+                  <Search
+                    size={15}
+                    color="#64748b"
+                    style={{
+                      position: "absolute",
+                      left: 12,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Пошук книги..."
+                    style={{ ...s.input, paddingLeft: 36 }}
+                  />
+                </div>
+              )}
+
+              {/* Book list */}
+              {books.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "28px 0",
+                    color: "#475569",
+                  }}
+                >
+                  <BookOpen
+                    size={42}
+                    style={{ margin: "0 auto 10px", opacity: 0.25 }}
+                  />
+                  <p style={{ fontSize: 13, margin: 0 }}>
+                    Бібліотека порожня.
+                    <br />
+                    Додай книгу або сфотографуй обкладинку 📷
+                  </p>
+                </div>
+              ) : filteredBooks.length === 0 ? (
+                <p
+                  style={{
+                    textAlign: "center",
+                    fontSize: 13,
+                    color: "#475569",
+                    padding: "16px 0",
+                    margin: 0,
+                  }}
+                >
+                  Нічого не знайдено за запитом «{searchQuery}»
+                </p>
+              ) : (
+                <ul
+                  style={{
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  {filteredBooks.map((book) => (
+                    <li
+                      key={book.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        backgroundColor: "#020617",
+                        border: `1px solid ${
+                          book.completed ? "#1e293b" : "#2d1f6e"
+                        }`,
+                        borderRadius: 12,
+                        padding: "11px 14px",
+                        opacity: book.completed ? 0.6 : 1,
+                        transition: "opacity .2s",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={book.completed}
+                        onChange={() => toggleBook(book.id)}
+                        style={{
+                          width: 18,
+                          height: 18,
+                          accentColor: "#7c3aed",
+                          cursor: "pointer",
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        style={{
+                          flex: 1,
+                          fontSize: 14,
+                          color: book.completed ? "#475569" : "#e2e8f0",
+                          textDecoration: book.completed
+                            ? "line-through"
+                            : "none",
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {book.completed ? "✅ " : "📘 "}
+                        {book.title}
+                      </span>
+                      <button
+                        onClick={() => deleteBook(book.id)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "#334155",
+                          padding: 3,
+                          display: "flex",
+                          flexShrink: 0,
+                        }}
+                        onMouseEnter={(e) =>
+                          (e.currentTarget.style.color = "#f87171")
+                        }
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.color = "#334155")
+                        }
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Hint */}
+              {!groqKey || groqKey === "Твій_ключ" ? (
+                <p
+                  style={{
+                    margin: "14px 0 0",
+                    fontSize: 11,
+                    color: "#475569",
+                    textAlign: "center",
+                  }}
+                >
+                  📷 Для сканування обкладинок потрібен Groq API ключ у
+                  Налаштуваннях
+                </p>
+              ) : (
+                <p
+                  style={{
+                    margin: "14px 0 0",
+                    fontSize: 11,
+                    color: "#475569",
+                    textAlign: "center",
+                  }}
+                >
+                  📷 Натисни{" "}
+                  <Camera
+                    size={11}
+                    style={{ display: "inline", verticalAlign: "middle" }}
+                  />{" "}
+                  щоб сфотографувати обкладинку — AI розпізнає назву автоматично
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ══ MENTOR CHAT ══ */}
         {tab === "mentor" && !groqKey && (
           <div style={{ ...s.card, textAlign: "center", padding: "48px 24px" }}>
@@ -1299,7 +1946,6 @@ export default function App() {
               maxHeight: 680,
             }}
           >
-            {/* Chat header */}
             <div
               style={{
                 ...s.card,
@@ -1392,8 +2038,6 @@ export default function App() {
                 </div>
               )}
             </div>
-
-            {/* Messages */}
             <div
               style={{
                 flex: 1,
@@ -1502,8 +2146,6 @@ export default function App() {
               )}
               <div ref={chatEndRef} />
             </div>
-
-            {/* Input */}
             <div
               style={{
                 backgroundColor: "#0f172a",
@@ -1564,8 +2206,6 @@ export default function App() {
                 <Send size={18} />
               </button>
             </div>
-
-            <style>{`@keyframes pulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.1)}}`}</style>
           </div>
         )}
 
@@ -1573,7 +2213,6 @@ export default function App() {
         {tab === "settings" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <h2 style={s.h2}>⚙️ Налаштування</h2>
-
             <div style={s.card}>
               <div
                 style={{
@@ -1615,7 +2254,7 @@ export default function App() {
                 />
               </div>
               <button
-                onClick={(reqPerm) =>
+                onClick={() =>
                   (async () => {
                     if (!("Notification" in window))
                       return alert("Браузер не підтримує сповіщення");
@@ -1634,7 +2273,6 @@ export default function App() {
                   : "🔔 Увімкнути сповіщення"}
               </button>
             </div>
-
             <div style={s.card}>
               <div
                 style={{
@@ -1716,7 +2354,6 @@ export default function App() {
                   : "❄️ Заморозити день (1× на тиждень)"}
               </button>
             </div>
-
             <div style={s.card}>
               <p style={{ margin: "0 0 10px", fontWeight: 700, fontSize: 15 }}>
                 🔗 Якірні звички
@@ -1747,7 +2384,6 @@ export default function App() {
                 </p>
               </div>
             </div>
-
             <div style={s.card}>
               <div
                 style={{
@@ -1759,7 +2395,7 @@ export default function App() {
               >
                 <Brain size={18} color="#a78bfa" />
                 <span style={{ fontWeight: 700, fontSize: 15 }}>
-                  Groq API — AI Ментор
+                  Groq API — AI Ментор & Сканер
                 </span>
               </div>
               <label style={s.label}>API Ключ (Groq)</label>
@@ -1792,7 +2428,7 @@ export default function App() {
                   {showKey ? "Сховати" : "Показати"}
                 </button>
               </div>
-              {groqKey ? (
+              {groqKey && groqKey !== "Твій_ключ" ? (
                 <div
                   style={{
                     backgroundColor: "#052e16",
@@ -1806,7 +2442,7 @@ export default function App() {
                 >
                   <CheckCircle2 size={15} color="#22c55e" />
                   <p style={{ margin: 0, fontSize: 13, color: "#86efac" }}>
-                    Ключ збережено. Ментор готовий!
+                    Ключ збережено. Ментор та сканер книг готові!
                   </p>
                 </div>
               ) : (
@@ -1823,7 +2459,7 @@ export default function App() {
                 >
                   <AlertCircle size={15} color="#f87171" />
                   <p style={{ margin: 0, fontSize: 13, color: "#fca5a5" }}>
-                    Введи ключ для роботи Ментора
+                    Введи ключ для роботи Ментора та AI-сканера обкладинок
                   </p>
                 </div>
               )}
