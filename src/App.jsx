@@ -208,7 +208,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
         body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
+          model: "llama-3.3-70b-versatile",
           max_tokens: 200,
           messages: [
             { role: "system", content: "Ти — інструктор йоги. Відповідай ТІЛЬКИ українською мовою. Давай стислі, практичні рекомендації." },
@@ -243,7 +243,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
         body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
+          model: "llama-3.3-70b-versatile",
           max_tokens: 400,
           messages: [
             {
@@ -328,7 +328,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
         body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
+          model: "llama-3.3-70b-versatile",
           messages: [{ role: "system", content: SYSTEM_PROMPT }, ...newHistory.map((m) => ({ role: m.role, content: m.content }))],
         }),
       });
