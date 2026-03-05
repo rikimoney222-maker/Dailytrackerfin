@@ -190,7 +190,7 @@ const FOOD_TAGS = [
 
 const SYSTEM_PROMPT = `Ти — емпатичний, мудрий життєвий ментор та психолог. Твоя мета — підтримувати користувача, допомагати йому тримати дисципліну, аналізувати причини ліні чи вигоряння, і давати короткі, дієві поради. Спілкуйся виключно українською мовою, будь дружнім і теплим, але не пиши занадто довгі тексти — максимум 3-4 речення у відповіді.`;
 
-const rand = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
+const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const s = {
   wrap: {
@@ -287,13 +287,13 @@ export default function App() {
 
   const fired = useRef({});
   const toastTimer = useRef(null);
-  const chatEndRef = useRef < any > null;
+  const chatEndRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, isTyping]);
 
-  const showToast = useCallback((msg: any) => {
+  const showToast = useCallback((msg) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3500);
