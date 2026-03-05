@@ -295,7 +295,7 @@ export default function App() {
 
   const showToast = useCallback((msg: any) => {
     setToast(msg);
-    clearTimeout(toastTimer.current);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
